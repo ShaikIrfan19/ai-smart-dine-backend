@@ -54,7 +54,7 @@ const restaurantSchema = new mongoose.Schema({
     bankName: String,
     upiId: String,
   },
-  razorpayAccountId: { type: String },
+
   subscriptionPlan: {
     type: String,
     enum: ['free', 'basic', 'pro', 'enterprise'],

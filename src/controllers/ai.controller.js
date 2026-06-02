@@ -1,62 +1,49 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
 const MenuItem = require('../models/MenuItem.model');
 const Order = require('../models/Order.model');
 const Table = require('../models/Table.model');
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const MODEL = 'llama3-8b-8192';
 
 // @POST /api/ai/recommendations
 const getFoodRecommendations = async (req, res) => {
   try {
     const { restaurantId, orderedItems, tableType, timeOfDay } = req.body;
 
-    // Get menu items for context
     const menuItems = await MenuItem.find({ restaurantId, isAvailable: true })
       .select('name category price isVeg spicyLevel rating totalOrders isPopular')
       .sort({ totalOrders: -1 })
       .limit(30);
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
     const prompt = `You are a smart restaurant AI assistant for "AI Smart Dine". 
     
-    Current menu items (top sellers): ${JSON.stringify(menuItems.map(m => ({ name: m.name, category: m.category, price: m.price, isVeg: m.isVeg, rating: m.rating, orders: m.totalOrders })))}
+    Current menu items: ${JSON.stringify(menuItems.map(m => ({ name: m.name, category: m.category, price: m.price, isVeg: m.isVeg, rating: m.rating, orders: m.totalOrders })))}
     
     Customer already ordered: ${JSON.stringify(orderedItems || [])}
     Table type: ${tableType || 'regular'}
     Time of day: ${timeOfDay || new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}
     
-    Based on this, provide:
+    Provide:
     1. Top 3 food recommendations with reasons
     2. One combo suggestion that saves money
     3. A friendly insight about popular items today
     
-    Respond in JSON format:
+    Respond STRICTLY with ONLY a JSON object in this format (no markdown, no extra text):
     {
       "recommendations": [{ "name": "...", "reason": "...", "category": "..." }],
       "combo": { "items": ["...", "..."], "savings": "₹XX", "message": "..." },
       "insight": "...",
       "greeting": "..."
-    }
-    
-    Keep it concise and friendly. Prices in ₹ INR only.`;
+    }`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: MODEL,
+      response_format: { type: 'json_object' }
+    });
 
-    let parsed;
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-    } catch {
-      parsed = {
-        recommendations: menuItems.slice(0, 3).map(m => ({ name: m.name, reason: 'Top rated item', category: m.category })),
-        combo: { items: [menuItems[0]?.name, menuItems[1]?.name], savings: '₹50', message: 'Popular combo today!' },
-        insight: `Today's top seller is ${menuItems[0]?.name}`,
-        greeting: 'Welcome! Here are our recommendations for you.',
-      };
-    }
-
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
     res.json({ success: true, data: parsed });
   } catch (error) {
     res.status(500).json({ success: false, message: 'AI service temporarily unavailable', error: error.message });
@@ -74,32 +61,30 @@ const chatWithAI = async (req, res) => {
 
     const tables = await Table.find({ restaurantId, status: 'available' });
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
     const systemContext = `You are "Dine AI", a helpful restaurant assistant for AI Smart Dine. 
     
-    Available menu (sample): ${JSON.stringify(menuItems.slice(0, 10).map(m => ({ name: m.name, price: `₹${m.price}`, isVeg: m.isVeg, category: m.category })))}
+    Available menu (sample): ${JSON.stringify(menuItems.slice(0, 10).map(m => ({ name: m.name, price: \`₹\${m.price}\`, isVeg: m.isVeg, category: m.category })))}
     Available tables: ${tables.length} tables currently free
     
     Be helpful, friendly, and concise. If asked about unavailable items, suggest alternatives.
     Always mention prices in ₹ INR. Keep responses under 100 words.`;
 
     const history = (conversationHistory || []).map(h => ({
-      role: h.role,
-      parts: [{ text: h.text }],
+      role: h.role === 'model' ? 'assistant' : 'user',
+      content: h.text,
     }));
 
-    const chat = model.startChat({
-      history: [
-        { role: 'user', parts: [{ text: systemContext }] },
-        { role: 'model', parts: [{ text: 'Understood! I am Dine AI, ready to help.' }] },
+    const completion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemContext },
+        { role: 'assistant', content: 'Understood! I am Dine AI, ready to help.' },
         ...history,
+        { role: 'user', content: message }
       ],
+      model: MODEL,
     });
 
-    const result = await chat.sendMessage(message);
-    const response = result.response.text();
-
+    const response = completion.choices[0]?.message?.content || 'I am sorry, I am having trouble understanding that right now.';
     res.json({ success: true, data: { response, timestamp: new Date() } });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Chatbot temporarily unavailable' });
@@ -133,36 +118,26 @@ const getRestaurantInsights = async (req, res) => {
     const todayRevenue = todayOrders.reduce((sum, o) => sum + o.totalAmount, 0);
     const peakHour = hourlyData.sort((a, b) => b.count - a.count)[0];
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const prompt = `Restaurant stats for today:
     - Total revenue: ₹${todayRevenue.toFixed(2)}
     - Total orders: ${todayOrders.length}
     - Top selling items: ${topItems.map(i => i._id).join(', ')}
-    - Peak hour: ${peakHour ? `${peakHour._id}:00` : 'No peak yet'}
+    - Peak hour: ${peakHour ? \`\${peakHour._id}:00\` : 'No peak yet'}
     
-    Give 3 actionable business insights in JSON format:
+    Give 3 actionable business insights. Respond STRICTLY with ONLY a JSON object in this format:
     { "insights": [{ "title": "...", "description": "...", "type": "positive/warning/tip" }], "summary": "..." }`;
 
-    const result = await model.generateContent(prompt);
-    let insights;
-    try {
-      const jsonMatch = result.response.text().match(/\{[\s\S]*\}/);
-      insights = JSON.parse(jsonMatch[0]);
-    } catch {
-      insights = {
-        insights: [
-          { title: `Revenue Today`, description: `₹${todayRevenue.toFixed(2)} earned today`, type: 'positive' },
-          { title: 'Top Seller', description: topItems[0]?._id || 'No data yet', type: 'tip' },
-          { title: 'Orders Today', description: `${todayOrders.length} orders processed`, type: 'positive' },
-        ],
-        summary: `Good performance today with ${todayOrders.length} orders.`,
-      };
-    }
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: MODEL,
+      response_format: { type: 'json_object' }
+    });
 
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
     res.json({
       success: true,
       data: {
-        ...insights,
+        ...parsed,
         stats: { todayRevenue, todayOrders: todayOrders.length, topItems, peakHour: peakHour?._id },
       },
     });
@@ -182,30 +157,21 @@ const suggestTable = async (req, res) => {
       seatingCapacity: { $gte: guestCount },
     });
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     const prompt = `Customer needs a table for ${guestCount} people at ${timeSlot || 'now'}.
     Preferences: ${preferences || 'none'}
     Available tables: ${JSON.stringify(availableTables.map(t => ({ number: t.tableNumber, type: t.tableType, capacity: t.seatingCapacity, features: t.features })))}
     
-    Suggest the best table and explain why in JSON:
+    Suggest the best table and explain why. Respond STRICTLY with ONLY a JSON object in this format:
     { "tableId": "...", "tableNumber": "...", "reason": "...", "alternatives": ["T2", "T5"] }`;
 
-    const result = await model.generateContent(prompt);
-    let suggestion;
-    try {
-      const jsonMatch = result.response.text().match(/\{[\s\S]*\}/);
-      suggestion = JSON.parse(jsonMatch[0]);
-    } catch {
-      const best = availableTables[0];
-      suggestion = {
-        tableId: best?._id,
-        tableNumber: best?.tableNumber,
-        reason: `Table ${best?.tableNumber} is the best available for your group.`,
-        alternatives: availableTables.slice(1, 3).map(t => t.tableNumber),
-      };
-    }
+    const completion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: MODEL,
+      response_format: { type: 'json_object' }
+    });
 
-    res.json({ success: true, data: suggestion });
+    const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    res.json({ success: true, data: parsed });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

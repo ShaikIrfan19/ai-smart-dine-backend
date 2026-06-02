@@ -54,11 +54,9 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['cash', 'upi', 'card', 'wallet', 'net_banking', 'razorpay', 'mixed'],
+    enum: ['cash', 'upi', 'card', 'wallet', 'net_banking', 'mixed'],
     default: null,
   },
-  razorpayOrderId: { type: String },
-  razorpayPaymentId: { type: String },
   notes: { type: String },
   specialInstructions: { type: String },
   estimatedTime: { type: Number }, // minutes
