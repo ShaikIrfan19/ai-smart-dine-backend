@@ -63,7 +63,7 @@ const chatWithAI = async (req, res) => {
 
     const systemContext = `You are "Dine AI", a helpful restaurant assistant for AI Smart Dine. 
     
-    Available menu (sample): ${JSON.stringify(menuItems.slice(0, 10).map(m => ({ name: m.name, price: \`₹\${m.price}\`, isVeg: m.isVeg, category: m.category })))}
+    Available menu (sample): ${JSON.stringify(menuItems.slice(0, 10).map(m => ({ name: m.name, price: '₹' + m.price, isVeg: m.isVeg, category: m.category })))}
     Available tables: ${tables.length} tables currently free
     
     Be helpful, friendly, and concise. If asked about unavailable items, suggest alternatives.
@@ -122,7 +122,7 @@ const getRestaurantInsights = async (req, res) => {
     - Total revenue: ₹${todayRevenue.toFixed(2)}
     - Total orders: ${todayOrders.length}
     - Top selling items: ${topItems.map(i => i._id).join(', ')}
-    - Peak hour: ${peakHour ? \`\${peakHour._id}:00\` : 'No peak yet'}
+    - Peak hour: ${peakHour ? peakHour._id + ':00' : 'No peak yet'}
     
     Give 3 actionable business insights. Respond STRICTLY with ONLY a JSON object in this format:
     { "insights": [{ "title": "...", "description": "...", "type": "positive/warning/tip" }], "summary": "..." }`;
