@@ -4,6 +4,7 @@ const QRCode = require('qrcode');
 const createTable = async (req, res) => {
   try {
     const tableData = req.body;
+    if (!tableData.restaurantId) tableData.restaurantId = req.user.restaurantId;
     const qrData = JSON.stringify({ restaurantId: tableData.restaurantId, tableNumber: tableData.tableNumber, tableId: 'pending' });
     const qrCode = await QRCode.toDataURL(qrData);
 
