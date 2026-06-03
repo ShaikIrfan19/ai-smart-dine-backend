@@ -9,7 +9,7 @@ router.get('/', protect, async (req, res) => {
     const { restaurantId, category, isVeg, isAvailable, search, page = 1, limit = 50 } = req.query;
     const filter = {};
     if (restaurantId) filter.restaurantId = restaurantId;
-    else if (req.user.restaurantId) filter.restaurantId = req.user.restaurantId;
+    else if (req.user.restaurantId || req.user._id) filter.restaurantId = req.user.restaurantId || req.user._id;
     if (category) filter.category = category;
     if (isVeg !== undefined) filter.isVeg = isVeg === 'true';
     if (isAvailable !== undefined) filter.isAvailable = isAvailable === 'true';
@@ -24,7 +24,7 @@ router.get('/', protect, async (req, res) => {
 // POST create menu item
 router.post('/', protect, authorize('restaurant_admin', 'super_admin'), async (req, res) => {
   try {
-    const item = await MenuItem.create({ ...req.body, restaurantId: req.body.restaurantId || req.user.restaurantId });
+    const item = await MenuItem.create({ ...req.body, restaurantId: req.body.restaurantId || req.user.restaurantId || req.user._id });
     res.status(201).json({ success: true, data: item });
   } catch (e) { res.status(500).json({ success: false, message: e.message }); }
 });
